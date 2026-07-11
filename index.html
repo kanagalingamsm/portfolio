@@ -706,7 +706,7 @@ body.light .chat-panel{ background:rgba(255,255,255,.75); backdrop-filter:blur(2
 
   <!-- ═══════ 08 ABOUT ═══════ -->
   <section id="about">
-    <div class="sec-index mono">08 — DEVELOPER</div>
+    <div class="sec-index mono">08 — OPERATOR</div>
     <div class="section-inner">
       <div class="about-grid">
         <div class="about-portrait reveal">
@@ -716,7 +716,7 @@ body.light .chat-panel{ background:rgba(255,255,255,.75); backdrop-filter:blur(2
         </div>
         <div class="about-copy reveal reveal-d1">
           <div class="eyebrow">About</div>
-          <h2 class="sec-title" style="font-size:clamp(34px,4.4vw,60px); margin-bottom:24px;">THE&nbsp;DEVELOPER</h2>
+          <h2 class="sec-title" style="font-size:clamp(34px,4.4vw,60px); margin-bottom:24px;">THE&nbsp;OPERATOR</h2>
           <p>I'm <strong>Kanagalingam S M</strong>, a full stack developer and AI engineer who treats software like infrastructure — built to hold up under real traffic, not just a demo click-through.</p>
           <p>My work sits at the intersection of <strong>application engineering, autonomous agents, and cloud systems</strong> — shipping products where the frontend, the intelligence layer, and the infrastructure are designed together, not bolted on afterward.</p>
           <div class="about-meta">
@@ -788,7 +788,7 @@ body.light .chat-panel{ background:rgba(255,255,255,.75); backdrop-filter:blur(2
   <div class="chat-head">
     <div class="chat-head-title">
       <span class="dot"></span>
-      <div><b>KANAGALINGAM's ASSISTANT</b><span>Ask me about Kandie's work</span></div>
+      <div><b>KSM ASSISTANT</b><span>Ask me about Kandie's work</span></div>
     </div>
     <button class="chat-close" id="chatClose" type="button" aria-label="Close chat">✕</button>
   </div>
@@ -837,16 +837,14 @@ body.light .chat-panel{ background:rgba(255,255,255,.75); backdrop-filter:blur(2
 </script>
 
 <script>
-/* ══════════════════════════ AI CHAT ASSISTANT — Mistral AI ══════════════════════════ */
-/* SECURITY NOTE: This key runs in the browser, which means anyone who views
-   this page's source can read and reuse it. That's an inherent risk of any
-   client-only integration (this is the same tradeoff as the EmailJS keys
-   earlier). If usage/billing exposure is a concern, put this call behind a
-   tiny serverless proxy (Cloudflare Worker / Vercel function) instead and
-   keep the real key server-side only. Paste your key below to activate. */
-const MISTRAL_API_KEY = 'Af4RtNLt4zIwxSXUSqLO9T3t4RXR6P6x';
-const MISTRAL_MODEL = 'mistral-small-latest';
-const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
+/* ══════════════════════════ AI CHAT ASSISTANT — Mistral AI (via proxy) ══════════════════════════ */
+/* No API key lives in this file anymore. This calls a small serverless
+   proxy (see mistral-proxy-worker.js) which holds the real Mistral key as
+   an encrypted server-side secret. Deploy the worker (instructions in that
+   file), then paste its URL below — that's the only thing that goes here.
+   Leaving this blank just means the assistant shows a "not connected"
+   message instead of erroring. */
+const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/'; // e.g. 'https://ksm-chat-proxy.yourname.workers.dev'
 
 (function(){
   const launcher = document.getElementById('chatLauncher');
@@ -952,9 +950,9 @@ const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
     history.push({ role:'user', content:text });
     showTyping();
 
-    if(!MISTRAL_API_KEY || MISTRAL_API_KEY === 'Af4RtNLt4zIwxSXUSqLO9T3t4RXR6P6x'){
+    if(!MISTRAL_PROXY_URL){
       hideTyping();
-      addMessage('bot', "The AI assistant isn't fully wired up yet — an API key needs to be added in the code. In the meantime: " + (wantsContact ? "here's how to reach Kandie directly." : "feel free to scroll around, or ask again once it's connected!"), wantsContact);
+      addMessage('bot', "The AI assistant isn't fully wired up yet — a proxy URL needs to be added in the code. In the meantime: " + (wantsContact ? "here's how to reach Kandie directly." : "feel free to scroll around, or ask again once it's connected!"), wantsContact);
       sendBtn.disabled = false;
       return;
     }
@@ -962,17 +960,11 @@ const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
     try{
       const systemPrompt = `You are the friendly AI assistant embedded on Kanagalingam S M's (KSM) portfolio website. Answer questions about him using ONLY the information below. Keep replies short (2-4 sentences), warm, and confident — matching a technical portfolio's tone. If someone wants to get in touch, hire him, or asks how to contact him, tell them you can take them to the contact section and keep your reply brief.\n\nSITE CONTENT:\n${buildSiteContext()}`;
 
-      const res = await fetch(MISTRAL_ENDPOINT, {
+      const res = await fetch(MISTRAL_PROXY_URL, {
         method:'POST',
-        headers:{
-          'Content-Type':'application/json',
-          'Authorization':'Bearer ' + MISTRAL_API_KEY
-        },
+        headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({
-          model: MISTRAL_MODEL,
-          messages: [ { role:'system', content: systemPrompt }, ...history.slice(-8) ],
-          temperature: 0.6,
-          max_tokens: 300
+          messages: [ { role:'system', content: systemPrompt }, ...history.slice(-8) ]
         })
       });
       if(!res.ok) throw new Error('Mistral request failed: ' + res.status);
