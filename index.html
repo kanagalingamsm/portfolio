@@ -418,6 +418,12 @@ body.light .chat-panel{ background:rgba(255,255,255,.75); backdrop-filter:blur(2
 .chat-msg.bot{ align-self:flex-start; background:var(--card-bg); border:1px solid var(--line); color:var(--dim); }
 .chat-msg.user{ align-self:flex-end; background:var(--accent); color:#000; font-weight:500; }
 .chat-msg a.chat-cta{ display:inline-block; margin-top:8px; font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent); border-bottom:1px solid var(--accent); cursor:pointer; }
+.chat-quick{ display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 12px; }
+.chat-quick button{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim);
+  background:var(--card-bg); border:1px solid var(--line); padding:6px 10px; cursor:pointer; transition:border-color .25s,color .25s,background .25s;
+}
+.chat-quick button:hover{ border-color:var(--accent); color:var(--accent); background:rgba(var(--accent-rgb),.08); }
 .chat-typing{ align-self:flex-start; display:flex; gap:4px; padding:10px 13px; }
 .chat-typing span{ width:5px; height:5px; border-radius:50%; background:var(--dimmer); animation:typingDot 1.2s infinite; }
 .chat-typing span:nth-child(2){ animation-delay:.15s; } .chat-typing span:nth-child(3){ animation-delay:.3s; }
@@ -793,6 +799,7 @@ body.light .chat-panel{ background:rgba(255,255,255,.75); backdrop-filter:blur(2
     <button class="chat-close" id="chatClose" type="button" aria-label="Close chat">✕</button>
   </div>
   <div class="chat-body" id="chatBody"></div>
+  <div class="chat-quick" id="chatQuick"></div>
   <div class="chat-input-row">
     <input type="text" id="chatInput" placeholder="Ask about skills, projects, contact..." autocomplete="off" />
     <button class="chat-send" id="chatSend" type="button" aria-label="Send message">
@@ -851,12 +858,69 @@ const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/
   const panel = document.getElementById('chatPanel');
   const closeBtn = document.getElementById('chatClose');
   const body = document.getElementById('chatBody');
+  const quickWrap = document.getElementById('chatQuick');
   const input = document.getElementById('chatInput');
   const sendBtn = document.getElementById('chatSend');
 
   let history = [];
   let contextBuilt = false;
   let siteContext = '';
+
+  /* ─────────────────────────────────────────────────────────────────
+     SECTION / NAVIGATION MAP
+     Every section on the page the assistant is allowed to jump to,
+     with the human-friendly label used in the "take me there" button
+     and a list of keyword patterns that count as the user asking for it.
+     Add a new section here and it's automatically routable — no other
+     code needs to change.
+     ───────────────────────────────────────────────────────────────── */
+  const SECTIONS = [
+    {
+      id: 'services',
+      label: 'Services',
+      patterns: [/\bservices?\b/i, /what (do|does) (he|kandie|ksm) (do|offer|build)/i, /what (can|do) (you|he) (offer|build)/i]
+    },
+    {
+      id: 'stack',
+      label: 'Tech Stack',
+      patterns: [/\b(tech )?stack\b/i, /\barchitecture\b/i, /\blayer(s|ed)?\b/i, /full[- ]?stack (dev|system)/i, /what (technologies|tech) (does|do) (he|kandie) use/i]
+    },
+    {
+      id: 'agents',
+      label: 'AI Agents',
+      patterns: [/\bagents?\b/i, /\bai (agent|system)s?\b/i, /\bgoogle adk\b/i, /\bllm\b/i, /multi[- ]?agent/i]
+    },
+    {
+      id: 'cloud',
+      label: 'Cloud Infra',
+      patterns: [/\bcloud\b/i, /\bgcp\b/i, /\binfrastructure\b/i, /\bdevops\b/i, /\bkubernetes\b/i, /\bdocker\b/i]
+    },
+    {
+      id: 'graph',
+      label: 'Graph DB',
+      patterns: [/\bgraph\b/i, /\bneo4j\b/i, /\bmemgraph\b/i, /graph database/i]
+    },
+    {
+      id: 'qa',
+      label: 'Testing & QA',
+      patterns: [/\btesting\b/i, /\bqa\b/i, /\bquality assurance\b/i, /test coverage/i, /\be2e\b/i, /\bunit tests?\b/i]
+    },
+    {
+      id: 'projects',
+      label: 'Projects',
+      patterns: [/\bprojects?\b/i, /\bportfolio\b/i, /\bcase stud(y|ies)\b/i, /\bwork (samples|examples)\b/i, /what (has|did) (he|kandie) (built|build|made)/i]
+    },
+    {
+      id: 'about',
+      label: 'About',
+      patterns: [/\babout\b/i, /who is (he|kandie|ksm)/i, /\bbio\b/i, /tell me about (him|kandie|ksm)/i, /\bbackground\b/i]
+    },
+    {
+      id: 'contact',
+      label: 'Contact',
+      patterns: [/\b(contact|reach|hire|email|call|phone|get in touch|talk to|connect|work with|available|freelance|book a call)\b/i]
+    }
+  ];
 
   /* Build a system-prompt context straight from the page's own content,
      so answers are grounded in what's actually on this site. */
@@ -885,10 +949,28 @@ const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/
     return siteContext;
   }
 
+  /* Render the row of quick-jump buttons under the chat body, one per
+     section, so the user can also just tap instead of typing. */
+  function renderQuickNav(){
+    quickWrap.innerHTML = '';
+    SECTIONS.forEach(sec=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = sec.label;
+      btn.addEventListener('click', ()=>{
+        addMessage('user', 'Take me to ' + sec.label);
+        scrollToSection(sec.id);
+        addMessage('bot', "On it — jumping to " + sec.label + ".");
+      });
+      quickWrap.appendChild(btn);
+    });
+  }
+
   function openChat(){
     panel.classList.add('open');
     if(body.children.length === 0){
-      addMessage('bot', "Hey, I'm KSM's site assistant. Ask me about Kandie's stack, AI agent work, projects, or how to get in touch.");
+      addMessage('bot', "Hey, I'm KSM's site assistant. Ask me about Kandie's stack, AI agent work, projects, or say things like \"take me to his contact\" or \"show me his projects\" and I'll scroll you straight there.");
+      renderQuickNav();
     }
     setTimeout(()=>input.focus(), 250);
   }
@@ -896,15 +978,16 @@ const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/
   launcher.addEventListener('click', ()=> panel.classList.contains('open') ? closeChat() : openChat());
   closeBtn.addEventListener('click', closeChat);
 
-  function addMessage(role, text, withContactCta){
+  function addMessage(role, text, ctaSectionId){
     const div = document.createElement('div');
     div.className = 'chat-msg ' + (role === 'user' ? 'user' : 'bot');
     div.textContent = text;
-    if(withContactCta){
+    if(ctaSectionId){
+      const sec = SECTIONS.find(s=>s.id===ctaSectionId);
       const cta = document.createElement('a');
       cta.className = 'chat-cta';
-      cta.textContent = 'Take me to Contact →';
-      cta.addEventListener('click', scrollToContact);
+      cta.textContent = 'Take me to ' + (sec ? sec.label : 'that section') + ' →';
+      cta.addEventListener('click', ()=> scrollToSection(ctaSectionId));
       div.appendChild(document.createElement('br'));
       div.appendChild(cta);
     }
@@ -925,19 +1008,36 @@ const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/
     if(t) t.remove();
   }
 
-  /* Smooth-scroll to the contact section — reuses the page's Lenis
+  /* Smooth-scroll to any section id — reuses the page's Lenis
      smooth-scroll instance if it's ready, otherwise falls back cleanly. */
-  function scrollToContact(){
+  function scrollToSection(sectionId){
+    const target = document.getElementById(sectionId);
+    if(!target) return;
     closeChat();
-    const target = document.getElementById('contact');
     if(window.lenis && typeof window.lenis.scrollTo === 'function'){
       window.lenis.scrollTo(target, { duration: 1.3 });
-    } else if(target){
+    } else {
       target.scrollIntoView({ behavior:'smooth', block:'start' });
     }
   }
 
-  const CONTACT_INTENT = /\b(contact|reach|hire|email|call|phone|get in touch|talk to|connect|work with|available|freelance|book a call)\b/i;
+  /* Figure out which section (if any) the user's message is asking to
+     navigate to. Checks patterns in the order defined in SECTIONS and
+     returns the first match — good enough for short chat messages where
+     only one navigation intent is realistically present at a time. */
+  function detectSectionIntent(text){
+    for(const sec of SECTIONS){
+      if(sec.patterns.some(re => re.test(text))) return sec.id;
+    }
+    return null;
+  }
+
+  /* A message only counts as a *navigation command* (not just a topic
+     mention) if it also contains a "go there" verb/phrase. Otherwise
+     "what services does he offer" would trigger a scroll when the user
+     really just wants a text answer — we still attach the CTA button
+     either way, but only auto-scroll on explicit navigation phrasing. */
+  const NAV_VERB = /\b(take|go|show|scroll|jump|navigate|bring|move|switch)\b.*\b(to|me)\b|\bshow me\b|\bwhere('?s| is)\b|\btake me\b/i;
 
   async function sendMessage(){
     const text = input.value.trim();
@@ -946,19 +1046,33 @@ const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/
     input.value = '';
     sendBtn.disabled = true;
 
-    const wantsContact = CONTACT_INTENT.test(text);
+    const matchedSectionId = detectSectionIntent(text);
+    const isExplicitNav = matchedSectionId && NAV_VERB.test(text);
+
     history.push({ role:'user', content:text });
     showTyping();
 
+    // Explicit navigation command — just act, no need to wait on the AI.
+    if(isExplicitNav){
+      hideTyping();
+      const sec = SECTIONS.find(s=>s.id===matchedSectionId);
+      addMessage('bot', "Sure — heading to " + sec.label + " now.");
+      history.push({ role:'assistant', content: "Navigated user to " + sec.label + " section." });
+      setTimeout(()=> scrollToSection(matchedSectionId), 500);
+      sendBtn.disabled = false;
+      input.focus();
+      return;
+    }
+
     if(!MISTRAL_PROXY_URL){
       hideTyping();
-      addMessage('bot', "The AI assistant isn't fully wired up yet — a proxy URL needs to be added in the code. In the meantime: " + (wantsContact ? "here's how to reach Kandie directly." : "feel free to scroll around, or ask again once it's connected!"), wantsContact);
+      addMessage('bot', "The AI assistant isn't fully wired up yet — a proxy URL needs to be added in the code. In the meantime: " + (matchedSectionId ? "here's a shortcut to that section." : "feel free to scroll around, or ask again once it's connected!"), matchedSectionId);
       sendBtn.disabled = false;
       return;
     }
 
     try{
-      const systemPrompt = `You are the friendly AI assistant embedded on Kanagalingam S M's (KSM) portfolio website. Answer questions about him using ONLY the information below. Keep replies short (2-4 sentences), warm, and confident — matching a technical portfolio's tone. If someone wants to get in touch, hire him, or asks how to contact him, tell them you can take them to the contact section and keep your reply brief.\n\nSITE CONTENT:\n${buildSiteContext()}`;
+      const systemPrompt = `You are the friendly AI assistant embedded on Kanagalingam S M's (KSM) portfolio website. Answer questions about him using ONLY the information below. Keep replies short (2-4 sentences), warm, and confident — matching a technical portfolio's tone. If someone asks about a specific section of the site (services, stack, AI agents, cloud, graph DB, testing, projects, about, contact) mention that you can take them there directly.\n\nSITE CONTENT:\n${buildSiteContext()}`;
 
       const res = await fetch(MISTRAL_PROXY_URL, {
         method:'POST',
@@ -974,19 +1088,14 @@ const MISTRAL_PROXY_URL = 'https://ksm-chat-proxy.kanagalingamsmoff.workers.dev/
         : "Sorry, I couldn't generate a response just now.";
 
       hideTyping();
-      addMessage('bot', reply, wantsContact);
+      addMessage('bot', reply, matchedSectionId);
       history.push({ role:'assistant', content: reply });
     }catch(err){
       hideTyping();
-      addMessage('bot', "Something went wrong reaching the AI service. " + (wantsContact ? "Here's the contact section instead." : "Please try again in a moment."), wantsContact);
+      addMessage('bot', "Something went wrong reaching the AI service. " + (matchedSectionId ? "Here's a shortcut to that section instead." : "Please try again in a moment."), matchedSectionId);
     }finally{
       sendBtn.disabled = false;
       input.focus();
-    }
-
-    // deterministic contact routing regardless of what the AI says
-    if(wantsContact){
-      setTimeout(scrollToContact, 1400);
     }
   }
 
@@ -1028,7 +1137,7 @@ const bootTimer = setInterval(()=>{
 
 /* ══════════════════════════ LENIS SMOOTH SCROLL ══════════════════════════ */
 const lenis = new Lenis({ duration:1.1, smoothWheel:true, lerp:0.09 });
-window.lenis = lenis; /* exposed so the chat widget's script can scroll to #contact */
+window.lenis = lenis; /* exposed so the chat widget's script can scroll to any section */
 function raf(time){ lenis.raf(time); requestAnimationFrame(raf); }
 requestAnimationFrame(raf);
 lenis.on('scroll', ScrollTrigger.update);
